@@ -1,0 +1,1 @@
+"""Example books application."""

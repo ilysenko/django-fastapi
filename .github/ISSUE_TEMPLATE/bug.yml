@@ -1,0 +1,39 @@
+name: Bug report
+description: Report reproducible django-fastapi behavior.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for taking the time to provide a small reproduction.
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Include settings, ASGI mounting, and one route without secrets.
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: Python, Django, FastAPI, Pydantic, Starlette, and django-fastapi.
+    validations:
+      required: true
+  - type: dropdown
+    id: topology
+    attributes:
+      label: Deployment topology
+      options:
+        - ASGI only
+        - Split WSGI and ASGI
+        - Development server or tests
+        - Other
+    validations:
+      required: true

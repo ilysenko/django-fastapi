@@ -1,0 +1,101 @@
+[project]
+name = "django-fastapi"
+version = "0.1.0"
+description = "Run FastAPI beside Django with shared settings, ORM, sessions, authentication, and CSRF protection."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "Igor Lysenko" }]
+maintainers = [{ name = "Igor Lysenko" }]
+keywords = ["asgi", "django", "fastapi", "pydantic", "sessions"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: Django",
+    "Framework :: Django :: 5.2",
+    "Framework :: FastAPI",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Typing :: Typed",
+]
+dependencies = [
+    "django>=5.2,<6.2",
+    "fastapi>=0.115,<1.0",
+    "pydantic>=2.9,<3.0",
+    "starlette>=0.37.2,<2.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "httpx>=0.27,<1.0",
+    "pytest>=8,<10",
+    "pytest-cov>=6,<8",
+    "pytest-django>=4.10,<5",
+]
+lint = [
+    "django-stubs>=5.2,<7",
+    "mypy>=1.15,<2",
+    "ruff>=0.12,<1",
+]
+docs = [
+    "mkdocs-material>=9.6,<10",
+    "mkdocstrings[python]>=0.29,<1",
+]
+release = [
+    "build>=1.2,<2",
+    "check-wheel-contents>=0.6,<1",
+    "twine>=6,<7",
+]
+
+[project.urls]
+Homepage = "https://github.com/ilysenko/django-fastapi"
+Documentation = "https://ilysenko.github.io/django-fastapi/"
+Repository = "https://github.com/ilysenko/django-fastapi"
+Issues = "https://github.com/ilysenko/django-fastapi/issues"
+Changelog = "https://github.com/ilysenko/django-fastapi/blob/main/CHANGELOG.md"
+
+[tool.poetry]
+packages = [{ include = "django_fastapi", from = "src" }]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "django_fastapi_testproject.settings"
+python_files = ["test_*.py"]
+testpaths = ["tests"]
+addopts = "--strict-markers --strict-config"
+pythonpath = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["django_fastapi"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+fail_under = 90
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+plugins = ["mypy_django_plugin.main"]
+packages = ["django_fastapi"]
+mypy_path = ["tests"]
+
+[tool.django-stubs]
+django_settings_module = "django_fastapi_testproject.settings"
+
+[build-system]
+requires = ["poetry-core>=2.4,<3"]
+build-backend = "poetry.core.masonry.api"

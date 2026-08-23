@@ -1,0 +1,78 @@
+site_name: django-fastapi
+site_description: Run FastAPI beside Django with shared settings, ORM, sessions, and users.
+site_url: https://ilysenko.github.io/django-fastapi/
+repo_url: https://github.com/ilysenko/django-fastapi
+repo_name: ilysenko/django-fastapi
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  features:
+    - content.code.copy
+    - navigation.indexes
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - tables
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            docstring_style: google
+            show_root_heading: true
+            show_source: false
+
+nav:
+  - Home: index.md
+  - Getting started:
+      - Architecture: architecture.md
+      - Five-minute quickstart: quickstart.md
+      - Configuration: configuration.md
+  - Django integration:
+      - Authentication, sessions, and CSRF: authentication.md
+      - Sync and async ORM: orm.md
+      - Pydantic and Django models: pydantic.md
+      - Testing: testing.md
+  - Deployment and operations:
+      - Deployment overview: deployment/index.md
+      - Existing WSGI deployment: deployment/wsgi.md
+      - Existing ASGI deployment: deployment/asgi.md
+      - Containers and Kubernetes: deployment/containers.md
+      - Operations: deployment/operations.md
+      - Production security: deployment/security.md
+      - Troubleshooting: troubleshooting.md
+  - Reference:
+      - Public API: api.md
+      - Limitations: limitations.md
+      - Maintainer releases: maintainers.md
+      - Changelog: changelog.md

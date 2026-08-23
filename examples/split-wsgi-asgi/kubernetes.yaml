@@ -1,0 +1,111 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: books-migrate
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: registry.example.com/acme/books:0.1.0
+          command: ["python", "manage.py", "migrate", "--noinput"]
+          envFrom:
+            - secretRef:
+                name: books-runtime
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: books-wsgi
+spec:
+  replicas: 3
+  selector:
+    matchLabels: {app: books-wsgi}
+  template:
+    metadata:
+      labels: {app: books-wsgi}
+    spec:
+      terminationGracePeriodSeconds: 45
+      containers:
+        - name: application
+          image: registry.example.com/acme/books:0.1.0
+          command: ["gunicorn"]
+          args: ["acme.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "4"]
+          envFrom:
+            - secretRef:
+                name: books-runtime
+          ports:
+            - {name: http, containerPort: 8000}
+          readinessProbe:
+            httpGet: {path: /django-health/, port: http}
+          livenessProbe:
+            httpGet: {path: /django-health/, port: http}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: books-wsgi
+spec:
+  selector: {app: books-wsgi}
+  ports:
+    - {name: http, port: 80, targetPort: http}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: books-asgi
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: books-asgi}
+  template:
+    metadata:
+      labels: {app: books-asgi}
+    spec:
+      terminationGracePeriodSeconds: 45
+      containers:
+        - name: application
+          image: registry.example.com/acme/books:0.1.0
+          command: ["uvicorn"]
+          args: ["acme.asgi:application", "--host", "0.0.0.0", "--port", "8001", "--workers", "2"]
+          envFrom:
+            - secretRef:
+                name: books-runtime
+          ports:
+            - {name: http, containerPort: 8001}
+          readinessProbe:
+            httpGet: {path: /api/health, port: http}
+          livenessProbe:
+            httpGet: {path: /api/health, port: http}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: books-asgi
+spec:
+  selector: {app: books-asgi}
+  ports:
+    - {name: http, port: 80, targetPort: http}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: books
+spec:
+  rules:
+    - host: example.com
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: books-asgi
+                port: {name: http}
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: books-wsgi
+                port: {name: http}
