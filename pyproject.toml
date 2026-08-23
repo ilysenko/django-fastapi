@@ -26,7 +26,7 @@ classifiers = [
 ]
 dependencies = [
     "django>=5.2,<6.2",
-    "fastapi>=0.115,<1.0",
+    "fastapi>=0.141.1,<1.0",
     "pydantic>=2.9,<3.0",
     "starlette>=0.37.2,<2.0",
 ]
