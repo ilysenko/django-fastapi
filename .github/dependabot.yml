@@ -4,9 +4,10 @@ updates:
     directory: "/"
     schedule:
       interval: weekly
-    groups:
-      python-development-dependencies:
-        dependency-type: development
+    # Runtime ranges express the oldest supported versions. Raising their lower
+    # bounds automatically would silently drop compatibility. Keep security
+    # updates enabled while disabling routine pip version-update pull requests.
+    open-pull-requests-limit: 0
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
@@ -19,3 +20,6 @@ updates:
     directory: "/examples/split-wsgi-asgi"
     schedule:
       interval: weekly
+    ignore:
+      # This is an intentionally fictional image used only in Kubernetes docs.
+      - dependency-name: acme/books

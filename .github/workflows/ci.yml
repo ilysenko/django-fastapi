@@ -118,7 +118,7 @@ jobs:
           test -n "$PRIVATE_LEAK_PATTERNS_B64"
           python scripts/check_public_tree.py . \
             --patterns-base64 "$PRIVATE_LEAK_PATTERNS_B64"
-      - uses: gitleaks/gitleaks-action@dcedce43c6f43de0b836d1fe38946645c9c638dc
+      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
