@@ -62,11 +62,11 @@ def main() -> int:
     parser.add_argument("root", nargs="?", type=Path, default=Path.cwd())
     parser.add_argument(
         "--patterns-base64",
-        default=os.environ.get("PUBLIC_LEAK_PATTERNS_B64", ""),
+        default=os.environ.get("PRIVATE_LEAK_PATTERNS_B64", ""),
     )
     args = parser.parse_args()
     if not args.patterns_base64:
-        parser.error("provide --patterns-base64 or set PUBLIC_LEAK_PATTERNS_B64")
+        parser.error("provide --patterns-base64 or set PRIVATE_LEAK_PATTERNS_B64")
     patterns = load_patterns(args.patterns_base64)
     findings = scan(args.root.resolve(), patterns)
     if findings:

@@ -110,10 +110,14 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           fetch-depth: 0
-      - name: Project-pattern scan
+      - name: Private project-pattern scan
+        if: github.event_name == 'push'
         env:
-          PUBLIC_LEAK_PATTERNS_B64: ${{ vars.PUBLIC_LEAK_PATTERNS_B64 }}
-        run: python scripts/check_public_tree.py .
+          PRIVATE_LEAK_PATTERNS_B64: ${{ secrets.PRIVATE_LEAK_PATTERNS_B64 }}
+        run: |
+          test -n "$PRIVATE_LEAK_PATTERNS_B64"
+          python scripts/check_public_tree.py . \
+            --patterns-base64 "$PRIVATE_LEAK_PATTERNS_B64"
       - uses: gitleaks/gitleaks-action@dcedce43c6f43de0b836d1fe38946645c9c638dc
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
