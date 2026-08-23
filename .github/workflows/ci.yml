@@ -118,9 +118,12 @@ jobs:
           test -n "$PRIVATE_LEAK_PATTERNS_B64"
           python scripts/check_public_tree.py . \
             --patterns-base64 "$PRIVATE_LEAK_PATTERNS_B64"
-      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Gitleaks
+        run: |
+          docker run --rm \
+            --volume "$GITHUB_WORKSPACE:/repo:ro" \
+            zricethezav/gitleaks@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f \
+            git /repo --redact=100 --no-banner
 
   compose-smoke:
     name: Compose smoke / ${{ matrix.example }}
