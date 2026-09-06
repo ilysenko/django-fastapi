@@ -49,7 +49,13 @@ def main() -> int:
             "authenticated": True,
             "username": "reader",
         }
-    print("Django and FastAPI shared the same authenticated session.")
+        for route in ("sync", "async", "simple"):
+            book_response = client.get(f"/api/books/1/{route}")
+            book_response.raise_for_status()
+            book = book_response.json()
+            assert book["id"] == 1
+            assert book["title"]
+    print("Django and FastAPI shared a session and served sync/async ORM routes.")
     return 0
 
 

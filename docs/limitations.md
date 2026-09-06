@@ -10,5 +10,6 @@
   response contracts in the application.
 - The bridge does not make synchronous libraries asynchronous.
 - Custom authentication and application authorization remain project policy.
-- FastAPI lifespan behavior belongs to the created FastAPI app and ASGI server;
-  test startup and shutdown hooks in the combined application.
+- The root composer enters the HTTP FastAPI lifespan and an optional supplied
+  root lifespan. WebSocket-app lifespan hooks are not entered separately; put
+  shared resources in the root lifespan.

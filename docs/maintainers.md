@@ -14,6 +14,14 @@ GitHub Actions.
 5. Require CI before merging external pull requests. Disable force pushes and
    branch deletion.
 
+## Source and documentation snapshots
+
+The current source metadata is `0.2.0`, but this snapshot is unreleased.
+A normal push to `main` updates CI and GitHub Pages; it does not create a tag,
+GitHub Release, or PyPI upload. Keep pending changes under `Unreleased` and
+record the public commit when installing from GitHub. Do not describe a local
+version change as a published release.
+
 ## Release checklist
 
 1. Update `CHANGELOG.md` and `project.version` in `pyproject.toml`.

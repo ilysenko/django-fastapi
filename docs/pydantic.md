@@ -126,7 +126,11 @@ inside an async endpoint. Load required data with `select_related()` or
 Always declare the response contract:
 
 ```python
+from django_fastapi import django_db
+
+
 @router.get("/{book_id}", response_model=BookResponse)
+@django_db
 def get_book(book_id: int) -> BookResponse:
     book = Book.objects.select_related("author").get(pk=book_id)
     return BookResponse.from_book(book)

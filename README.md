@@ -1,7 +1,5 @@
 # django-fastapi
 
-[![PyPI](https://img.shields.io/pypi/v/django-fastapi.svg)](https://pypi.org/project/django-fastapi/)
-[![Python](https://img.shields.io/pypi/pyversions/django-fastapi.svg)](https://pypi.org/project/django-fastapi/)
 [![CI](https://github.com/ilysenko/django-fastapi/actions/workflows/ci.yml/badge.svg)](https://github.com/ilysenko/django-fastapi/actions/workflows/ci.yml)
 [![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://ilysenko.github.io/django-fastapi/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
@@ -23,10 +21,26 @@ ASGI server
 
 ## Installation
 
+For ORM routes, see [connection ownership](docs/orm.md#connection-ownership):
+decorate synchronous ORM handlers/dependencies with `@django_db`, use
+`database_sync_to_async` for short synchronous DB units from async code, and
+release connections before long external waits. HTTP requests receive automatic
+thread-sensitive cleanup; WebSocket operations need explicit short DB boundaries.
+
+The current documentation describes the **unreleased 0.2.0 source snapshot**.
+Install a reviewed public commit to use the WebSocket and database lifecycle APIs:
+
 ```bash
-python -m pip install django-fastapi
+git clone https://github.com/ilysenko/django-fastapi.git
+cd django-fastapi
+# Record this public commit and use it for repeatable installations.
+DJANGO_FASTAPI_COMMIT=$(git rev-parse HEAD)
+python -m pip install "django-fastapi @ git+https://github.com/ilysenko/django-fastapi.git@${DJANGO_FASTAPI_COMMIT}"
 python -m pip install uvicorn  # or daphne
 ```
+
+Publishing source and documentation does not publish a new package to PyPI.
+
 
 ## Five-minute setup
 
@@ -121,6 +135,7 @@ complete Nginx, Docker Compose, and Kubernetes examples.
 - [Architecture and quickstart](https://ilysenko.github.io/django-fastapi/quickstart/)
 - [Authentication, sessions, and CSRF](https://ilysenko.github.io/django-fastapi/authentication/)
 - [Pydantic and Django models](https://ilysenko.github.io/django-fastapi/pydantic/)
+- [WebSockets](https://ilysenko.github.io/django-fastapi/websockets/)
 - [Sync and async ORM usage](https://ilysenko.github.io/django-fastapi/orm/)
 - [Production deployment](https://ilysenko.github.io/django-fastapi/deployment/)
 - [Configuration reference](https://ilysenko.github.io/django-fastapi/configuration/)
@@ -141,3 +156,10 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 ## License
 
 MIT
+
+## API discovery settings
+
+The bridge preserves FastAPI's default `/docs`, `/redoc`, and `/openapi.json`
+endpoints. The bundled deployment examples disable all three explicitly with
+`FASTAPI_KWARGS`; remove that override to enable them for local exploration.
+Use the same options on HTTP and WebSocket apps when discovery should be disabled.

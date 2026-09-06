@@ -46,4 +46,8 @@ DJANGO_FASTAPI = {
     "PREFIX": "/api",
     "TITLE": "Acme Books API",
     "ROUTERS": ["books.api.router"],
+    # FastAPI serves /docs, /redoc and /openapi.json by default. Disable them
+    # unless the API surface is meant to be public -- this block is the
+    # copy-paste source for downstream projects.
+    "FASTAPI_KWARGS": {"docs_url": None, "redoc_url": None, "openapi_url": None},
 }

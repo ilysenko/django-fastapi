@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import pytest
 from django.core.exceptions import PermissionDenied
 from django.http import Http404, HttpResponse, JsonResponse, StreamingHttpResponse
 from fastapi import FastAPI
+from starlette.requests import ClientDisconnect
 from starlette.responses import Response
 from starlette.testclient import TestClient
 
@@ -79,3 +81,65 @@ def test_django_exceptions_are_translated_to_json_responses() -> None:
     assert client.get("/missing").status_code == 404
     assert client.get("/forbidden").json() == {"detail": "Book is private."}
     assert client.get("/forbidden").status_code == 403
+
+
+@pytest.mark.parametrize("spec_version", ["2.3", "2.4"])
+@pytest.mark.parametrize("failure", ["send", "disconnect", "complete"])
+def test_async_stream_closes_source_in_consuming_task(spec_version, failure):
+    import asyncio
+    from contextvars import ContextVar
+
+    owner = ContextVar("stream_owner")
+    finalized = []
+
+    async def run():
+        sent = asyncio.Event()
+
+        async def source():
+            task = asyncio.current_task()
+            token = owner.set(task)
+            try:
+                yield b"first"
+                if failure == "disconnect":
+                    await asyncio.sleep(60)
+                yield b"second"
+            finally:
+                await asyncio.sleep(0)
+                assert asyncio.current_task() is task
+                owner.reset(token)
+                finalized.append(True)
+
+        response = django_response_to_fastapi(StreamingHttpResponse(source()))
+
+        async def receive():
+            await sent.wait()
+            if failure == "disconnect":
+                return {"type": "http.disconnect"}
+            await asyncio.sleep(60)
+
+        async def send(message):
+            if message["type"] == "http.response.body" and message.get("body"):
+                sent.set()
+                if failure == "send":
+                    raise OSError("client disconnected")
+                if failure == "disconnect" and spec_version == "2.4":
+                    # New ASGI servers report disconnects as send errors.
+                    raise OSError("client disconnected")
+                if failure == "disconnect":
+                    # Disconnect while sending a yielded chunk: the adapter
+                    # must close the suspended source under its cleanup shield.
+                    await asyncio.sleep(60)
+
+        try:
+            await response(
+                {"type": "http", "asgi": {"spec_version": spec_version}}, receive, send
+            )
+        except Exception as exc:
+            assert failure in {"send", "disconnect"}
+            errors = getattr(exc, "exceptions", (exc,))
+            assert all(
+                isinstance(error, (OSError, ClientDisconnect)) for error in errors
+            )
+        assert finalized == [True]
+
+    asyncio.run(run())

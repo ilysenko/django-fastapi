@@ -3,18 +3,18 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any, cast
 
-from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
-from django.http import HttpResponse
 from django.utils.module_loading import import_string
 from fastapi import APIRouter, Depends, FastAPI
-from starlette.middleware.base import RequestResponseEndpoint
-from starlette.requests import Request
-from starlette.responses import Response
 
-from django_fastapi.auth import validate_auth_resolvers
+from django_fastapi.auth import (
+    validate_auth_resolvers,
+    validate_session_middleware,
+    validate_websocket_config,
+)
 from django_fastapi.csrf import require_csrf, validate_csrf_config
+from django_fastapi.database import DjangoHTTPMiddleware
 from django_fastapi.exceptions import install_django_exception_handlers
 
 DEFAULT_PREFIX = "/api"
@@ -37,7 +37,10 @@ def create_fastapi_app(config: Mapping[str, Any] | None = None) -> FastAPI:
     app = FastAPI(**fastapi_kwargs)
     app.state.django_fastapi_config = dict(resolved_config)
     app.state.django_fastapi_auth_resolvers = validate_auth_resolvers(resolved_config)
-    _install_django_session_response_middleware(app)
+    app.state.django_fastapi_session_middleware = validate_session_middleware(
+        resolved_config
+    )
+    app.add_middleware(DjangoHTTPMiddleware)
     install_django_exception_handlers(app)
     for configurator in _get_app_configurators(resolved_config):
         configurator(app)
@@ -46,33 +49,24 @@ def create_fastapi_app(config: Mapping[str, Any] | None = None) -> FastAPI:
     return app
 
 
-def _install_django_session_response_middleware(app: FastAPI) -> None:
-    @app.middleware("http")
-    async def django_session_response_middleware(
-        request: Request,
-        call_next: RequestResponseEndpoint,
-    ) -> Response:
-        response = await call_next(request)
-        django_request = getattr(request.state, "django_request", None)
-        session_middleware = getattr(request.state, "django_session_middleware", None)
-        if django_request is None or session_middleware is None:
-            return response
-
-        django_response = HttpResponse(status=response.status_code)
-        for key, value in response.headers.items():
-            django_response[key] = value
-        processed_response = await sync_to_async(
-            session_middleware.process_response,
-            thread_sensitive=True,
-        )(
-            django_request,
-            django_response,
-        )
-        for key, value in processed_response.items():
-            response.headers[key] = value
-        for morsel in processed_response.cookies.values():
-            response.headers.append("set-cookie", morsel.OutputString())
-        return response
+def create_websocket_app(config: Mapping[str, Any] | None = None) -> FastAPI:
+    """Create a CSRF-free FastAPI app for configured WebSocket routers."""
+    resolved_config = _resolve_config(config)
+    validate_websocket_config(resolved_config)
+    # Carry FASTAPI_KWARGS here too. Without it this app keeps FastAPI's default
+    # /docs, /redoc and /openapi.json, and only the websocket-scope mount keeps
+    # them unreachable -- protection that lives in the routing rather than in
+    # the configuration, and that a change to a plain Mount would remove.
+    fastapi_kwargs = _get_mapping(resolved_config, "FASTAPI_KWARGS")
+    fastapi_kwargs["title"] = (
+        f"{resolved_config.get('TITLE', DEFAULT_TITLE)} WebSockets"
+    )
+    fastapi_kwargs.pop("dependencies", None)
+    app = FastAPI(**fastapi_kwargs)
+    app.state.django_fastapi_config = dict(resolved_config)
+    for router_path in _get_router_paths(resolved_config, key="WEBSOCKET_ROUTERS"):
+        app.include_router(_import_router(router_path))
+    return app
 
 
 def get_fastapi_prefix(config: Mapping[str, Any] | None = None) -> str:
@@ -108,14 +102,16 @@ def _get_mapping(config: Mapping[str, Any], key: str) -> dict[str, Any]:
     return dict(value)
 
 
-def _get_router_paths(config: Mapping[str, Any]) -> Sequence[str]:
-    router_paths = config.get("ROUTERS", ())
+def _get_router_paths(
+    config: Mapping[str, Any], *, key: str = "ROUTERS"
+) -> Sequence[str]:
+    router_paths = config.get(key, ())
     if isinstance(router_paths, str) or not isinstance(router_paths, Sequence):
-        raise ImproperlyConfigured(f"{SETTINGS_NAME}['ROUTERS'] must be a sequence.")
+        raise ImproperlyConfigured(f"{SETTINGS_NAME}[{key!r}] must be a sequence.")
     for router_path in router_paths:
         if not isinstance(router_path, str):
             raise ImproperlyConfigured(
-                f"{SETTINGS_NAME}['ROUTERS'] entries must be dotted paths."
+                f"{SETTINGS_NAME}[{key!r}] entries must be dotted paths."
             )
     return cast(Sequence[str], router_paths)
 

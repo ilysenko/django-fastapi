@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict
 
 from books.models import Book
-from django_fastapi import get_current_user
+from django_fastapi import django_db, get_current_user
 
 router = APIRouter(tags=["books"])
 
@@ -42,6 +42,7 @@ def me(
 
 
 @router.get("/books/{book_id}/sync", response_model=BookResponse)
+@django_db
 def get_book_sync(book_id: int) -> BookResponse:
     book = Book.objects.select_related("author").get(pk=book_id)
     return BookResponse.from_book(book)
@@ -54,6 +55,7 @@ async def get_book_async(book_id: int) -> BookResponse:
 
 
 @router.get("/books/{book_id}/simple", response_model=SimpleBookResponse)
+@django_db
 def get_simple_book(book_id: int) -> SimpleBookResponse:
     book = Book.objects.get(pk=book_id)
     return SimpleBookResponse.model_validate(book)

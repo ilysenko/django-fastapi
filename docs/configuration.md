@@ -8,8 +8,12 @@ DJANGO_FASTAPI = {
     "TITLE": "Django FastAPI",
     "FASTAPI_KWARGS": {},
     "ROUTERS": [],
+    "WEBSOCKET_ROUTERS": [],
+    "WEBSOCKET_TRUSTED_ORIGINS": [],
     "APP_CONFIGURATORS": [],
     "AUTH_RESOLVERS": ["django_fastapi.auth.session_auth_resolver"],
+    # Optional: omit to use Django's SessionMiddleware.
+    "SESSION_MIDDLEWARE": "django.contrib.sessions.middleware.SessionMiddleware",
     "CSRF": {
         "ENABLED": True,
         "EXEMPT_PATHS": [],
@@ -23,8 +27,11 @@ DJANGO_FASTAPI = {
 | `TITLE` | `"Django FastAPI"` | FastAPI title unless supplied in `FASTAPI_KWARGS`. |
 | `FASTAPI_KWARGS` | `{}` | Keyword arguments passed to `FastAPI(...)`. |
 | `ROUTERS` | `[]` | Dotted paths to `fastapi.APIRouter` objects, included in order. |
+| `WEBSOCKET_ROUTERS` | `[]` | Routers included on the separate WebSocket app. |
+| `WEBSOCKET_TRUSTED_ORIGINS` | `[]` | Explicit complete origins allowed to bypass same-origin WebSocket validation. |
 | `APP_CONFIGURATORS` | `[]` | Dotted paths to callables receiving the created FastAPI app. |
 | `AUTH_RESOLVERS` | session resolver | Ordered sync or async user resolvers. |
+| `SESSION_MIDDLEWARE` | Django `SessionMiddleware` | Optional HTTP session middleware class; supports async request/response hooks. See [session hooks](authentication.md#custom-http-session-hooks). |
 | `CSRF.ENABLED` | `True` | Require Django CSRF validation for unsafe methods. |
 | `CSRF.EXEMPT_PATHS` | `[]` | Exact paths exempted from CSRF validation. |
 
@@ -73,4 +80,23 @@ Configurators run before configured routers are included.
 ```
 
 The bridge appends its CSRF dependency to any global dependencies already
-provided here.
+provided here. The separate WebSocket app receives the same keyword arguments
+except `dependencies`, which are removed, and its generated WebSocket title.
+HTTP auth resolvers, session hooks, and app configurators are HTTP-only.
+
+## WebSocket routers
+
+`WEBSOCKET_ROUTERS` contains dotted paths to `fastapi.APIRouter` objects, just
+like `ROUTERS`, but they are installed on a separate application without the
+HTTP CSRF dependency:
+
+```python
+DJANGO_FASTAPI = {
+    "PREFIX": "/async/api",
+    "ROUTERS": ["project.http.router"],
+    "WEBSOCKET_ROUTERS": ["project.realtime.router"],
+}
+```
+
+Create and mount that application explicitly with `create_websocket_app()` and
+the `websocket_app=` argument to `mount_django_fastapi_app()`.

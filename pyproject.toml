@@ -1,6 +1,6 @@
 [project]
 name = "django-fastapi"
-version = "0.1.0"
+version = "0.2.0"
 description = "Run FastAPI beside Django with shared settings, ORM, sessions, authentication, and CSRF protection."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -25,6 +25,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
+    "anyio>=4,<5",
     "django>=5.2,<6.2",
     "fastapi>=0.115,<1.0",
     "pydantic>=2.9,<3.0",

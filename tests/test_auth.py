@@ -8,8 +8,8 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AnonymousUser
 from django.core.exceptions import ImproperlyConfigured
-from django.test import Client
-from fastapi import APIRouter, Depends, Request
+from django.test import Client, override_settings
+from fastapi import APIRouter, Depends, FastAPI, Request, WebSocket
 from starlette.testclient import TestClient
 
 from django_fastapi import (
@@ -18,6 +18,8 @@ from django_fastapi import (
     get_current_staff_user,
     get_current_user,
     get_django_request,
+    resolve_websocket_auth,
+    validate_websocket_origin,
 )
 
 AUTH_MODULE_NAME = "django_fastapi_test_auth_resolvers"
@@ -228,3 +230,149 @@ def test_get_django_request_is_cached_per_fastapi_request() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"same_request": True, "has_session": True}
+
+
+@pytest.mark.django_db(transaction=True)
+def test_websocket_auth_resolves_session_user_and_anonymous_session() -> None:
+    user = _create_user("websocket-user")
+    cookie_name, cookie_value = _session_cookie_for(user)
+    app = FastAPI()
+
+    @app.websocket("/ws")
+    async def websocket_auth(websocket: WebSocket) -> None:
+        validate_websocket_origin(websocket)
+        auth = await resolve_websocket_auth(websocket)
+        await websocket.accept()
+        await websocket.send_json(
+            {
+                "authenticated": bool(auth.user.is_authenticated),
+                "username": getattr(auth.user, "username", ""),
+                "has_session": bool(auth.session_key),
+                "scheme": auth.request.scheme,
+                "is_secure": auth.request.is_secure(),
+                "absolute_uri": auth.request.build_absolute_uri("/account"),
+            }
+        )
+        await websocket.close()
+
+    client = TestClient(app)
+    client.cookies.set(cookie_name, cookie_value)
+    with client.websocket_connect(
+        "/ws", headers={"origin": "http://testserver"}
+    ) as websocket:
+        assert websocket.receive_json() == {
+            "authenticated": True,
+            "username": "websocket-user",
+            "has_session": True,
+            "scheme": "http",
+            "is_secure": False,
+            "absolute_uri": "http://testserver/account",
+        }
+
+
+@pytest.mark.django_db(transaction=True)
+def test_secure_websocket_auth_builds_secure_django_request() -> None:
+    app = FastAPI()
+
+    @app.websocket("/ws")
+    async def websocket_auth(websocket: WebSocket) -> None:
+        validate_websocket_origin(websocket)
+        auth = await resolve_websocket_auth(websocket)
+        await websocket.accept()
+        await websocket.send_json(
+            {
+                "scheme": auth.request.scheme,
+                "is_secure": auth.request.is_secure(),
+                "absolute_uri": auth.request.build_absolute_uri("/account"),
+            }
+        )
+        await websocket.close()
+
+    client = TestClient(app)
+    with client.websocket_connect(
+        "wss://testserver/ws",
+        headers={"origin": "https://testserver"},
+    ) as websocket:
+        assert websocket.receive_json() == {
+            "scheme": "https",
+            "is_secure": True,
+            "absolute_uri": "https://testserver/account",
+        }
+
+
+def test_websocket_origin_rejects_untrusted_origin() -> None:
+    app = FastAPI()
+
+    @app.websocket("/ws")
+    async def websocket_auth(websocket: WebSocket) -> None:
+        validate_websocket_origin(websocket)
+        await websocket.accept()
+
+    client = TestClient(app)
+    with (
+        pytest.raises(Exception) as rejected,
+        client.websocket_connect("/ws", headers={"origin": "https://attacker.example"}),
+    ):
+        pass
+    assert getattr(rejected.value, "code", None) == 1008
+
+
+@override_settings(ALLOWED_HOSTS=["testserver", "sibling.example"])
+def test_websocket_origin_rejects_allowed_cross_origin_host() -> None:
+    app = FastAPI()
+
+    @app.websocket("/ws")
+    async def websocket_auth(websocket: WebSocket) -> None:
+        validate_websocket_origin(websocket)
+        await websocket.accept()
+
+    client = TestClient(app)
+    with (
+        pytest.raises(Exception) as rejected,
+        client.websocket_connect("/ws", headers={"origin": "https://sibling.example"}),
+    ):
+        pass
+    assert getattr(rejected.value, "code", None) == 1008
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "ftp://testserver",
+        "https://testserver",
+        "http://testserver:81",
+        "http://testserver/path",
+    ],
+)
+def test_websocket_origin_rejects_wrong_scheme_or_port(origin: str) -> None:
+    app = FastAPI()
+
+    @app.websocket("/ws")
+    async def websocket_auth(websocket: WebSocket) -> None:
+        validate_websocket_origin(websocket)
+        await websocket.accept()
+
+    client = TestClient(app)
+    with (
+        pytest.raises(Exception) as rejected,
+        client.websocket_connect("/ws", headers={"origin": origin}),
+    ):
+        pass
+    assert getattr(rejected.value, "code", None) == 1008
+
+
+def test_websocket_origin_accepts_explicit_trusted_origin() -> None:
+    app = FastAPI()
+    app.state.django_fastapi_config = {
+        "WEBSOCKET_TRUSTED_ORIGINS": ["https://app.example"]
+    }
+
+    @app.websocket("/ws")
+    async def websocket_auth(websocket: WebSocket) -> None:
+        validate_websocket_origin(websocket)
+        await websocket.accept()
+        await websocket.close()
+
+    client = TestClient(app)
+    with client.websocket_connect("/ws", headers={"origin": "https://app.example"}):
+        pass

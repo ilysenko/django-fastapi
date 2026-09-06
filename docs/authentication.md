@@ -96,3 +96,28 @@ def webhook():
 ```
 
 The endpoint must then validate the provider signature itself.
+
+## Custom HTTP session hooks
+
+Set `SESSION_MIDDLEWARE` to a dotted class path when your session backend needs
+native async I/O. Omit it to retain Django's standard `SessionMiddleware`.
+The constructor receives `get_response`; synchronous `process_request(request)`
+constructs the session store and must not perform blocking I/O. An optional
+`async aprocess_request(request)` runs next, before authentication.
+
+Before response headers are sent, the bridge calls
+`async aprocess_response(request, response)` when present; otherwise it runs
+synchronous `process_response` inside `database_sync_to_async`. The response hook
+must return the response. Async hooks must be coroutine methods; invalid classes
+fail at application creation with `ImproperlyConfigured`.
+
+The response passed to the hook is a session-only scratch response. Only changed
+`Vary` and generated cookies are merged into the outgoing response. Existing
+`Set-Cookie` headers survive, and a bodyless 204/304 response does not acquire a
+synthetic `Content-Type`. Set other response headers in application middleware.
+Session modifications made after headers have been sent cannot be persisted.
+
+Hook failures propagate as errors; a cache outage must not become an anonymous
+session. Keep project authentication and authorization policy in your resolver.
+WebSocket helpers use standard Django session authentication; they do not inherit
+`SESSION_MIDDLEWARE`, its async hooks, or HTTP `AUTH_RESOLVERS`.

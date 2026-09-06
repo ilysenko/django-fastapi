@@ -4,17 +4,27 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from inspect import iscoroutinefunction
 from io import BytesIO
 from typing import TYPE_CHECKING, Annotated, Any, TypeAlias, cast
+from urllib.parse import urlsplit
 
-from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.contrib.sessions.middleware import SessionMiddleware
 from django.core.exceptions import ImproperlyConfigured
 from django.core.handlers.asgi import ASGIRequest
 from django.http import HttpRequest, HttpResponse
+from django.http.request import split_domain_port, validate_host
 from django.http.response import HttpResponseBase
 from django.utils.functional import SimpleLazyObject
 from django.utils.module_loading import import_string
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import (
+    Depends,
+    HTTPException,
+    Request,
+    WebSocket,
+    WebSocketException,
+    status,
+)
+
+from django_fastapi.database import database_sync_to_async
 
 SETTINGS_NAME = "DJANGO_FASTAPI"
 DEFAULT_AUTH_RESOLVERS = ("django_fastapi.auth.session_auth_resolver",)
@@ -33,6 +43,19 @@ AuthResolver: TypeAlias = Callable[
 ]
 
 
+class WebSocketAuth:
+    """Resolved Django session and user for a WebSocket handshake."""
+
+    def __init__(self, request: HttpRequest, user: AuthUser) -> None:
+        self.request = request
+        self.user = user
+        self.session = request.session
+
+    @property
+    def session_key(self) -> str | None:
+        return self.session.session_key
+
+
 def _empty_response(_request: HttpRequest) -> HttpResponseBase:
     return HttpResponse()
 
@@ -44,8 +67,15 @@ async def get_django_request(request: Request) -> HttpRequest:
         return cast(HttpRequest, existing_request)
 
     django_request = ASGIRequest(request.scope, BytesIO(await request.body()))
-    session_middleware = SessionMiddleware(_empty_response)
+    middleware_cls = getattr(
+        request.app.state, "django_fastapi_session_middleware", None
+    )
+    if middleware_cls is None:
+        middleware_cls = validate_session_middleware(_get_settings_config(request))
+    session_middleware = middleware_cls(_empty_response)
     session_middleware.process_request(django_request)
+    if hasattr(session_middleware, "aprocess_request"):
+        await session_middleware.aprocess_request(django_request)
     request.state.django_session_middleware = session_middleware
     cast(Any, django_request).user = await _resolve_user(request, django_request)
     request.state.django_request = django_request
@@ -94,6 +124,166 @@ def session_auth_resolver(
     return cast(AuthUser, django_request.user)
 
 
+async def resolve_websocket_auth(websocket: WebSocket) -> WebSocketAuth:
+    """Resolve Django's session authentication for a WebSocket handshake."""
+    existing = getattr(websocket.state, "django_websocket_auth", None)
+    if isinstance(existing, WebSocketAuth):
+        return existing
+
+    scope = dict(websocket.scope)
+    scope["type"] = "http"
+    websocket_scheme = scope.get("scheme")
+    if websocket_scheme in {"ws", "wss"}:
+        scope["scheme"] = "https" if websocket_scheme == "wss" else "http"
+    scope.setdefault("method", "GET")
+    scope.setdefault("query_string", b"")
+    request = ASGIRequest(scope, BytesIO())
+
+    def resolve() -> WebSocketAuth:
+        SessionMiddleware(_empty_response).process_request(request)
+        user = session_auth_resolver(cast(Request, websocket), request)
+        # AuthenticationMiddleware uses SimpleLazyObject; force it while still
+        # inside Django's thread-sensitive sync boundary.
+        bool(getattr(user, "is_authenticated", False))
+        cast(Any, request).user = user
+        return WebSocketAuth(request, cast(AuthUser, user))
+
+    auth = await database_sync_to_async(resolve)()
+    websocket.state.django_websocket_auth = auth
+    return auth
+
+
+async def require_websocket_user(websocket: WebSocket) -> AuthUser:
+    """Return an authenticated WebSocket user or close with policy violation."""
+    auth = await resolve_websocket_auth(websocket)
+    if not _is_authenticated(auth.user):
+        raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION)
+    return auth.user
+
+
+def validate_websocket_origin(websocket: WebSocket) -> None:
+    """Validate Host, Origin, and the default same-origin policy."""
+    allowed_hosts = list(settings.ALLOWED_HOSTS)
+    host_header = websocket.headers.get("host", "").lower()
+    host, _port = split_domain_port(host_header)
+    origin = websocket.headers.get("origin")
+    if not host or not validate_host(host, allowed_hosts):
+        raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION)
+    if not origin:
+        raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION)
+    parsed_origin = urlsplit(origin)
+    origin_host = parsed_origin.hostname
+    if not origin_host:
+        raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION)
+    if parsed_origin.scheme not in {"http", "https"}:
+        raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION)
+    if parsed_origin.username is not None or parsed_origin.password is not None:
+        raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION)
+    if (
+        parsed_origin.path not in {"", "/"}
+        or parsed_origin.query
+        or parsed_origin.fragment
+    ):
+        raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION)
+    normalized_origin = (
+        f"{parsed_origin.scheme.lower()}://{parsed_origin.netloc.lower()}"
+    )
+    trusted_origins = _get_websocket_trusted_origins(websocket)
+    if normalized_origin in trusted_origins:
+        return
+    try:
+        host_url = urlsplit(f"//{host_header}")
+        host_port = host_url.port
+        origin_port = parsed_origin.port
+    except ValueError as exc:
+        raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION) from exc
+    websocket_scheme = websocket.scope.get("scheme", "ws")
+    expected_origin_scheme = "https" if websocket_scheme == "wss" else "http"
+    default_port = 443 if expected_origin_scheme == "https" else 80
+    effective_origin_port = origin_port if origin_port is not None else default_port
+    effective_host_port = host_port if host_port is not None else default_port
+    same_origin = (
+        parsed_origin.scheme == expected_origin_scheme
+        and origin_host == host_url.hostname
+        and effective_origin_port == effective_host_port
+    )
+    if not same_origin or not validate_host(origin_host, allowed_hosts):
+        raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION)
+
+
+def _get_websocket_trusted_origins(websocket: WebSocket) -> set[str]:
+    config = getattr(websocket.app.state, "django_fastapi_config", None)
+    if not isinstance(config, Mapping):
+        config = getattr(settings, SETTINGS_NAME, {})
+    values = (
+        config.get("WEBSOCKET_TRUSTED_ORIGINS", ())
+        if isinstance(config, Mapping)
+        else ()
+    )
+    return validate_websocket_config({"WEBSOCKET_TRUSTED_ORIGINS": values})
+
+
+def validate_websocket_config(config: Mapping[str, Any]) -> set[str]:
+    """Validate and normalize configured trusted WebSocket origins."""
+    values = config.get("WEBSOCKET_TRUSTED_ORIGINS", ())
+    if isinstance(values, str) or not isinstance(values, Sequence):
+        raise ImproperlyConfigured(
+            f"{SETTINGS_NAME}['WEBSOCKET_TRUSTED_ORIGINS'] must be a sequence."
+        )
+    if not all(isinstance(value, str) for value in values):
+        raise ImproperlyConfigured(
+            f"{SETTINGS_NAME}['WEBSOCKET_TRUSTED_ORIGINS'] entries must be origins."
+        )
+    normalized: set[str] = set()
+    for value in values:
+        parsed = urlsplit(value)
+        try:
+            _ = parsed.port
+        except ValueError as exc:
+            raise ImproperlyConfigured(
+                f"Invalid WebSocket trusted origin {value!r}."
+            ) from exc
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path not in {"", "/"}
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ImproperlyConfigured(f"Invalid WebSocket trusted origin {value!r}.")
+        normalized.add(value.lower().rstrip("/"))
+    return normalized
+
+
+def validate_session_middleware(config: Mapping[str, Any]) -> type[Any]:
+    """Resolve the optional session hook class at startup, not per request."""
+    path = config.get("SESSION_MIDDLEWARE")
+    if path is None:
+        return SessionMiddleware
+    if not isinstance(path, str) or not path:
+        raise ImproperlyConfigured("SESSION_MIDDLEWARE must be a dotted class path.")
+    try:
+        middleware = import_string(path)
+    except ImportError as exc:
+        raise ImproperlyConfigured("Could not import SESSION_MIDDLEWARE.") from exc
+    if not isinstance(middleware, type) or not callable(
+        getattr(middleware, "process_request", None)
+    ):
+        raise ImproperlyConfigured("SESSION_MIDDLEWARE requires process_request.")
+    for hook in ("aprocess_request", "aprocess_response"):
+        if hasattr(middleware, hook) and not iscoroutinefunction(
+            getattr(middleware, hook)
+        ):
+            raise ImproperlyConfigured(f"SESSION_MIDDLEWARE.{hook} must be async.")
+    if not callable(getattr(middleware, "process_response", None)) and not hasattr(
+        middleware, "aprocess_response"
+    ):
+        raise ImproperlyConfigured("SESSION_MIDDLEWARE requires a response hook.")
+    return middleware
+
+
 def validate_auth_resolvers(config: Mapping[str, Any]) -> tuple[AuthResolver, ...]:
     """Import configured auth resolvers and validate they are callables."""
     return tuple(
@@ -128,7 +318,7 @@ async def _call_auth_resolver(
         resolved_user = await async_resolver(request, django_request)
         return resolved_user, _is_authenticated(resolved_user)
 
-    return await sync_to_async(
+    return await database_sync_to_async(
         _call_sync_auth_resolver,
         thread_sensitive=True,
     )(resolver, request, django_request)

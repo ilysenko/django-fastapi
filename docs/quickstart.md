@@ -4,17 +4,20 @@ This guide assumes an existing Django 5.2 or newer project.
 
 ## 1. Install the bridge and a server
 
-=== "Uvicorn"
+The current documentation describes the **unreleased 0.2.0 source snapshot**.
+Install a reviewed public commit to use the WebSocket and database lifecycle APIs:
 
-    ```bash
-    python -m pip install django-fastapi uvicorn
-    ```
+```bash
+git clone https://github.com/ilysenko/django-fastapi.git
+cd django-fastapi
+# Record this public commit and use it for repeatable installations.
+DJANGO_FASTAPI_COMMIT=$(git rev-parse HEAD)
+python -m pip install "django-fastapi @ git+https://github.com/ilysenko/django-fastapi.git@${DJANGO_FASTAPI_COMMIT}"
+python -m pip install uvicorn  # or daphne
+```
 
-=== "Daphne"
+Publishing source and documentation does not publish a new package to PyPI.
 
-    ```bash
-    python -m pip install django-fastapi daphne
-    ```
 
 ## 2. Add a FastAPI router
 
@@ -99,3 +102,10 @@ The default resolver returns the same Django user.
 
 Next, read [authentication and CSRF](authentication.md) and choose the correct
 [ORM calling style](orm.md).
+
+## API discovery settings
+
+The bridge preserves FastAPI's default `/docs`, `/redoc`, and `/openapi.json`
+endpoints. The bundled deployment examples disable all three explicitly with
+`FASTAPI_KWARGS`; remove that override to enable them for local exploration.
+Use the same options on HTTP and WebSocket apps when discovery should be disabled.

@@ -8,7 +8,11 @@ endpoint style based on the code it calls.
 FastAPI runs `def` operations in a worker thread. Use the normal Django ORM:
 
 ```python
+from django_fastapi import django_db
+
+
 @router.get("/books/{book_id}", response_model=BookResponse)
+@django_db
 def get_book(book_id: int) -> BookResponse:
     book = Book.objects.select_related("author").get(pk=book_id)
     return BookResponse.from_book(book)
@@ -40,7 +44,7 @@ Keep a transactional workflow in one synchronous function and cross the
 boundary once:
 
 ```python
-from asgiref.sync import sync_to_async
+from django_fastapi import database_sync_to_async
 from django.db import transaction
 
 
@@ -51,7 +55,7 @@ def checkout_sync(user, payload):
 
 @router.post("/checkout")
 async def checkout(user: AuthenticatedUser, payload: CheckoutPayload):
-    return await sync_to_async(checkout_sync, thread_sensitive=True)(user, payload)
+    return await database_sync_to_async(checkout_sync)(user, payload)
 ```
 
 Do not set `DJANGO_ALLOW_ASYNC_UNSAFE` in production. It disables Django's
@@ -61,7 +65,37 @@ This boundary follows Django's own
 [asynchronous support guidance](https://docs.djangoproject.com/en/6.1/topics/async/):
 keep a transaction or other synchronous workflow inside one synchronous
 function, then call that function with
-`sync_to_async(..., thread_sensitive=True)`.
+`database_sync_to_async(...)`, which preserves `thread_sensitive=True` and
+returns the thread's database leases in `finally`.
+
+## Connection ownership
+
+Created HTTP apps install a pure ASGI middleware with a separate
+`ThreadSensitiveContext` per request. Cleanup runs on that executor before
+streaming response headers and at completion, including errors and cancellation.
+Session changes are persisted before headers. This does not automatically clean
+FastAPI's unrelated AnyIO sync worker threads: decorate ORM-using synchronous
+handlers **and dependencies** with `@django_db` (inside the route decorator).
+Signatures are preserved, and all initialized Django aliases are covered.
+`django_db` accepts ordinary synchronous functions only. It rejects generator
+(`yield`) dependencies and async functions at decoration time: their work would
+otherwise execute after the cleanup boundary had already exited. For a `yield`
+dependency, put each short ORM operation in a separate decorated sync helper;
+do not keep a transaction or lease across the yield.
+
+Use `await aclose_db_connections()` before a long external await after async
+ORM work, and in an async stream's `finally` block. For WebSockets, use
+`database_sync_to_async` around each short DB operation; never reserve a
+connection for the socket's lifetime. None of these helpers closes a connection
+inside an active atomic block: finish transactions before external waits.
+
+Set `CONN_MAX_AGE=0` under ASGI. On supported PostgreSQL/psycopg installations,
+Django's `DATABASES["default"]["OPTIONS"]["pool"]` configures a bounded native
+pool; close then returns a lease rather than necessarily disconnecting TCP.
+Shared helpers preserve healthy persistent connections when `CONN_MAX_AGE` is
+nonzero (for example in WSGI/Celery); only obsolete or unusable ones are closed.
+The host application owns pool sizing, overload responses, monitoring, and
+shutdown. The bridge does not create or globally monkeypatch a pool/executor.
 
 ## Query planning before serialization
 

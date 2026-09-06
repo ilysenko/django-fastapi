@@ -60,6 +60,7 @@ nav:
       - Configuration: configuration.md
   - Django integration:
       - Authentication, sessions, and CSRF: authentication.md
+      - WebSockets: websockets.md
       - Sync and async ORM: orm.md
       - Pydantic and Django models: pydantic.md
       - Testing: testing.md
